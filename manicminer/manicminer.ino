@@ -5,7 +5,7 @@
 char debug[80];
 
 #define CHEAT_INVINCIBLE    0   // means Willy unaffected by nasties
-#define START_LEVEL         0  // level to start on, 0-18
+#define START_LEVEL         1   // level to start on, 0-18
 #define CHEAT_OPEN_PORTAL   0   // Portal always open
 
 // Game has three controls: LEFT, RIGHT, JUMP.  You can map them
@@ -187,9 +187,12 @@ static void draw_level(void)
   // GD.cmd_slider(10, 250, 400, 10, 0, 66, 100);
   // GD.cmd_regwrite(0, 0x55aa);
 
+  GD.Tag(CONTROL_JUMP);
+
   GD.Begin(BITMAPS);
   {
-    byte levelstart = state.level * 15;
+    GD.BitmapHandle(TILES_HANDLE);
+    GD.BitmapSource(TILES_MEM + 15 * 64 * state.level);
     uint32_t pmap = level_base();
     for (byte y = 0; y < 16; y++) {
       byte x;
@@ -203,7 +206,7 @@ static void draw_level(void)
       pmap += 32;
 
       for (x = 0; x < 32; x++)
-        screen2ii(x << 3, y << 3, 2, levelstart + line[x]);
+        screen2ii(x << 3, y << 3, 2, line[x]);
     }
   }
 
@@ -243,10 +246,10 @@ static void draw_status(byte playing)
   GD.ColorRGB(0xaaaa00);
   GD.Vertex2ii(x, y);
   GD.Vertex2ii(x + 256, y + 15);
-  GD.ColorRGB(0xe00000);
+  GD.ColorRGB(0xa00000);
   GD.Vertex2ii(x, y + 16);
   GD.Vertex2ii(x + 64, y + 30);
-  GD.ColorRGB(0x00e000);
+  GD.ColorRGB(0x00a000);
   GD.Vertex2ii(x + 64, y + 16);
   GD.Vertex2ii(x + 256, y + 30);
 
@@ -258,10 +261,23 @@ static void draw_status(byte playing)
 
     GD.ColorRGB(WHITE);
     GD.cmd_text(x + 26, y + 23, 26, OPT_CENTERY | OPT_RIGHTX, "AIR");
-    GD.LineWidth(32);
+
+    uint16_t air_x0 = x + 4 * 8;
+    uint16_t air_x1 = x + 4 * 8 + state.air;
+    uint16_t air_y = y + 23;
+
     GD.Begin(LINES);
-    GD.Vertex2ii(x + 4 * 8, y + 23);
-    GD.Vertex2ii(x + 4 * 8 + state.air, y + 23);
+    GD.LineWidth(64);
+    GD.ColorRGB(BLACK);
+    GD.ColorA(128);
+    GD.Vertex2ii(air_x0, air_y);
+    GD.Vertex2ii(air_x1, air_y);
+
+    GD.LineWidth(32);
+    GD.ColorRGB(WHITE);
+    GD.ColorA(255);
+    GD.Vertex2ii(air_x0, air_y);
+    GD.Vertex2ii(air_x1, air_y);
   }
 
   GD.ColorRGB(YELLOW);
@@ -365,11 +381,15 @@ void setup()
 static void draw_guardians(void)
 {
   guardian *pg;
+
+  GD.BitmapHandle(GUARDIANS_HANDLE);
+  GD.BitmapSource(GUARDIANS_MEM + 8 * 32 * state.level);
+
   for (byte i = 0; i < 8; i++) {
     pg = &guards[i];
     if (pg->a) {
       GD.ColorRGB(attr(pg->a));
-      screen2ii(pg->x, pg->y, 1, pg->f);
+      screen2ii(pg->x, pg->y, GUARDIANS_HANDLE, pg->f);
     }
   }
   pg = &guards[4];
@@ -511,6 +531,17 @@ static int canbe(byte x, byte y)
     (GD.rd(addr+33) != ELEM_WALL);
 }
 
+// is Willy standing in a solar ray?
+static int inray(byte x, byte y)
+{
+  uint32_t addr = atxy(x / 8, y / 8);
+  return
+    (GD.rd(addr) > 0x80 ) ||
+    (GD.rd(addr+1) > 0x80) ||
+    (GD.rd(addr+32) > 0x80) ||
+    (GD.rd(addr+33) > 0x80);
+}
+
 static void move_all(void)
 {
   state.t++;
@@ -590,7 +621,7 @@ static void move_all(void)
   }
 
   byte onground = ((1 <= elem) && (elem <= 4)) || ((7 <= elem) && (elem <= 16));
-  sprintf(debug, "jumping=%d elem=%d onground=%d", state.jumping, elem, onground);
+  // sprintf(debug, "jumping=%d elem=%d onground=%d", state.jumping, elem, onground);
   if (state.jumping) {
     if ((JUMP_APEX <= state.jumping) && ychanged && onground) {
       state.jumping = 0;
@@ -609,16 +640,15 @@ static void move_all(void)
     crumble(feet_addr + 1);
   }
 
-#if 0
   if (((state.t & 7) == 0) ||
      ((state.level == 18) && inray(state.wx, state.wy))) {
     state.air--;
-    plot_air();
     if (state.air == 0) {
-      alive = 0;
+      state.alive = 0;
     }
   }
 
+#if 0
   GD.waitvblank();    // let the screen display, then check for collisions
   byte coll = GD.rd(COLLISION + IMG_WILLY);
   if (coll <= (IMG_ITEM + 4)) {

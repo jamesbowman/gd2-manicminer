@@ -228,9 +228,11 @@ class ManicMiner(gd2.prep.AssetBin):
         willy = Image.fromstring("1", (16, 8 * 16), m[33280-16384:33536-16384].tostring())
         self.load_handle("WILLY", gd2.prep.split(16, 16, willy), gd2.L1)
 
+        self.add("GUARDIANS_MEM", "");
         guardians = sum([l.guardian_images() for l in levels], [])
         self.load_handle("GUARDIANS", guardians, gd2.L1)
 
+        self.add("TILES_MEM", "");
         tiles = sum([l.background_tiles() for l in levels], [])
         self.load_handle("TILES", tiles, gd2.RGB332)
 

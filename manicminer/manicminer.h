@@ -619,10 +619,12 @@ static const PROGMEM prog_uchar __assets[9240] = {
 #define WILLY_WIDTH 16
 #define WILLY_HEIGHT 16
 #define WILLY_CELLS 8
+#define GUARDIANS_MEM 256UL
 #define GUARDIANS_HANDLE 1
 #define GUARDIANS_WIDTH 16
 #define GUARDIANS_HEIGHT 16
 #define GUARDIANS_CELLS 152
+#define TILES_MEM 5120UL
 #define TILES_HANDLE 2
 #define TILES_WIDTH 8
 #define TILES_HEIGHT 8
