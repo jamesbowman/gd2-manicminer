@@ -2,6 +2,8 @@
 #include <SPI.h>
 #include <GD2.h>
 
+char debug[80];
+
 #define CHEAT_INVINCIBLE    0   // means Willy unaffected by nasties
 #define START_LEVEL         0  // level to start on, 0-18
 #define CHEAT_OPEN_PORTAL   0   // Portal always open
@@ -58,6 +60,7 @@ static uint32_t attr(byte a)
 struct state_t {
   byte level;
   byte lives;
+  byte alive;
   byte t;
   uint32_t score;
   uint32_t hiscore;
@@ -167,10 +170,13 @@ static void load_level(void)
   state.wyv = 0;
 }
 
+static uint32_t level_base()
+{
+  return MANICMINER_ASSET_MAPS + (state.level << 9);
+}
+
 static void draw_level(void)
 {
-  uint16_t mapsize = 16 * 32;
-
   const PROGMEM level *l = &levels[state.level];
 
   GD.ClearColorRGB(pgm_read_dword(&(l->border)));
@@ -182,9 +188,9 @@ static void draw_level(void)
   // GD.cmd_regwrite(0, 0x55aa);
 
   GD.Begin(BITMAPS);
-  byte levelstart = state.level * 15;
   {
-    uint32_t pmap = MANICMINER_ASSET_MAPS + state.level * mapsize;
+    byte levelstart = state.level * 15;
+    uint32_t pmap = level_base();
     for (byte y = 0; y < 16; y++) {
       byte x;
       byte line[32];
@@ -362,9 +368,7 @@ static void draw_guardians(void)
   for (byte i = 0; i < 8; i++) {
     pg = &guards[i];
     if (pg->a) {
-      // Color is pg->a
       GD.ColorRGB(attr(pg->a));
-    // if (state.level == 1) exit(0);
       screen2ii(pg->x, pg->y, 1, pg->f);
     }
   }
@@ -478,6 +482,35 @@ static void move_guardians(void)
   }
 }
 
+uint32_t atxy(byte x, byte y)
+{
+  return level_base() + (y << 5) + x;
+}
+
+// crumble block at s, which is the sequence
+// 2->8->9->10->11->12->13->14->0
+
+static void crumble(uint32_t s)
+{
+  byte r = GD.rd(s);
+  signed char nexts[] = {
+    -1, -1,  8, -1, -1, -1, -1, -1,
+    9,  10, 11, 12, 13, 14, 0 };
+  if (r < sizeof(nexts) && nexts[r] != -1)
+    GD.wr(s, nexts[r]);
+}
+
+// is it legal for willy to be at (x,y)
+static int canbe(byte x, byte y)
+{
+  uint32_t addr = atxy(x / 8, y / 8);
+  return
+    (GD.rd(addr) != ELEM_WALL) &&
+    (GD.rd(addr+1) != ELEM_WALL) &&
+    (GD.rd(addr+64) != ELEM_WALL) &&
+    (GD.rd(addr+65) != ELEM_WALL);
+}
+
 static void move_all(void)
 {
   state.t++;
@@ -487,7 +520,6 @@ static void move_all(void)
   // See http://www.seasip.demon.co.uk/Jsw/manic.mac
   // and http://jetsetwilly.jodi.org/poke.html
 
-#if 0
   byte con = control();
   byte ychanged = 0;  // if Y block changes must check for landing later
   if (state.jumping) {
@@ -497,15 +529,16 @@ static void move_all(void)
     byte index = min(sizeof(moves) - 1, state.jumping - 1);
     byte newy = state.wy + moves[index];
     state.jumping++;
-    if (canbe(state.wx, newy)) {
+    if (1 || canbe(state.wx, newy)) {
       ychanged = (state.wy >> 3) != (newy >> 3);
       state.wy = newy;
     } else {
       state.jumping = max(state.jumping, JUMP_FALL);   // halt ascent
       ychanged = 1;
     }
+    // sprintf(debug, "jumping=%d index=%d (%d,%d)", state.jumping, index, state.wx, state.wy);
   }
-  uint16_t feet_addr = atxy(state.wx >> 3, (state.wy + 16) >> 3);
+  uint32_t feet_addr = atxy(state.wx >> 3, (state.wy + 16) >> 3);
   byte elem0 = GD.rd(feet_addr);
   byte elem1 = GD.rd(feet_addr + 1);
   byte elem = ((1 <= elem0) && (elem0 <= 31)) ? elem0 : elem1;
@@ -557,6 +590,7 @@ static void move_all(void)
   }
 
   byte onground = ((1 <= elem) && (elem <= 4)) || ((7 <= elem) && (elem <= 16));
+  // sprintf(debug, "jumping=%d elem=%d onground=%d", state.jumping, elem, onground);
   if (state.jumping) {
     if ((JUMP_APEX <= state.jumping) && ychanged && onground) {
       state.jumping = 0;
@@ -575,7 +609,8 @@ static void move_all(void)
     crumble(feet_addr + 1);
   }
 
-  if (((t & 7) == 0) ||
+#if 0
+  if (((state.t & 7) == 0) ||
      ((state.level == 18) && inray(state.wx, state.wy))) {
     state.air--;
     plot_air();
@@ -583,6 +618,7 @@ static void move_all(void)
       alive = 0;
     }
   }
+
   GD.waitvblank();    // let the screen display, then check for collisions
   byte coll = GD.rd(COLLISION + IMG_WILLY);
   if (coll <= (IMG_ITEM + 4)) {
@@ -633,7 +669,7 @@ static void draw_all(void)
     draw_guardians();
     draw_status(1);
     draw_controls();
-    GD.cmd_number(0, 0, 31, 0, GD.inputs.tag);
+    GD.cmd_text(0, 0, 18, 0, debug);
     GD.swap();
     GD.cmd_regwrite(REG_SOUND, 0);
     GD.cmd_regwrite(REG_PLAY, 1);
@@ -717,7 +753,8 @@ void loop()
   load_level();
 
   for (state.lives = 3; state.lives; state.lives--) {
-    for (int i = 0; i < 160; i++) {
+    state.alive = 1;
+    while (state.alive) {
       draw_all();
       move_all();
     }
