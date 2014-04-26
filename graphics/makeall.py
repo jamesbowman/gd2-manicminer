@@ -225,33 +225,29 @@ class ManicMiner(gd2.prep.AssetBin):
         self.screens = screens
         self.levels = levels
 
-        assets = []
-        assets.append(("maps", "".join([l.background_str() for l in levels])))
-
         willy = Image.fromstring("1", (16, 8 * 16), m[33280-16384:33536-16384].tostring())
         self.load_handle("WILLY", gd2.prep.split(16, 16, willy), gd2.L1)
 
         guardians = sum([l.guardian_images() for l in levels], [])
-        self.load_handle("MANICMINER_ASSET_GUARDIANS", guardians, gd2.L1)
+        self.load_handle("GUARDIANS", guardians, gd2.L1)
 
         tiles = sum([l.background_tiles() for l in levels], [])
-        self.load_handle("MANICMINER_ASSET_TILES", tiles, gd2.RGB332)
+        self.load_handle("TILES", tiles, gd2.RGB332)
 
         portals = [l.portal_image() for l in levels]
-        self.load_handle("MANICMINER_ASSET_PORTALS", portals, gd2.RGB332)
+        self.load_handle("PORTALS", portals, gd2.RGB332)
 
         items = [l.item_image() for l in levels]
-        self.load_handle("MANICMINER_ASSET_ITEMS", items, gd2.L1)
+        self.load_handle("ITEMS", items, gd2.L1)
 
-        self.load_handle("MANICMINER_ASSET_TITLE", [Image.open("mmtitle.png")], gd2.RGB332)
+        self.load_handle("TITLE", [Image.open("mmtitle.png")], gd2.RGB332)
 
         eugene = levels[4].special_image()
         plinth = levels[1].special_image()
         boot = levels[2].special_image()
-        self.load_handle("MANICMINER_ASSET_SPECIALS", [eugene, plinth, boot], gd2.L1)
+        self.load_handle("SPECIALS", [eugene, plinth, boot], gd2.L1)
 
-        for (name, s) in assets:
-            self.add("MANICMINER_ASSET_%s" % name.upper(), s)
+        self.add("MANICMINER_ASSET_MAPS", "".join([l.background_str() for l in levels]))
         
     def extras(self, hh):
 
