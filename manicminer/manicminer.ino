@@ -5,8 +5,8 @@
 char debug[80];
 
 #define CHEAT_INVINCIBLE    0   // means Willy unaffected by nasties
-#define START_LEVEL         1   // level to start on, 0-18
-#define CHEAT_OPEN_PORTAL   0   // Portal always open
+#define START_LEVEL         0   // level to start on, 0-18
+#define CHEAT_OPEN_PORTAL   1   // Portal always open
 
 // Game has three controls: LEFT, RIGHT, JUMP.  You can map them
 // to any pins by changing the definitions of PIN_L, PIN_R, PIN_J
@@ -68,6 +68,8 @@ struct state_t {
   byte bidir;
   byte air;
   byte conveyordir;
+  byte conveyor0[16];
+  byte conveyor1[16];
   byte portalattr;
   byte nitems;
   byte items[5];
@@ -82,6 +84,16 @@ struct state_t {
   uint16_t prevray[MAXRAY];
   byte switch1, switch2;
 } state;
+
+// Read graphics memory... this should really be moved to GD2.
+static void readmem(byte *dst, uint32_t src, size_t n)
+{
+  GD.bulkrd(src);
+  SPI.transfer(0);
+  while (n--)
+    *dst++ = SPI.transfer(0);
+  GD.resume();
+}
 
 static void screen2ii(byte x, byte y, byte handle = 0, byte cell = 0)
 {
@@ -113,6 +125,12 @@ static void load_level(void)
 
   // Conveyor direction
   state.conveyordir = pgm_read_byte_near(&l->conveyordir);
+
+  uint32_t level_chars = TILES_MEM + 15 * 64 * state.level;
+  readmem(state.conveyor0, level_chars + 4 * 64, 8);
+  memcpy(state.conveyor0 + 8, state.conveyor0, 8);
+  readmem(state.conveyor1, level_chars + 4 * 64 + 3 * 8 , 8);
+  memcpy(state.conveyor1 + 8, state.conveyor1, 8);
 
   // the hguardians
   state.bidir = pgm_read_byte_near(&l->bidir);
@@ -198,11 +216,7 @@ static void draw_level(void)
       byte x;
       byte line[32];
 
-      GD.bulkrd(pmap);
-      SPI.transfer(0);
-      for (x = 0; x < 32; x++)
-        line[x] = SPI.transfer(0);
-      GD.resume();
+      readmem(line, pmap, 32);
       pmap += 32;
 
       for (x = 0; x < 32; x++)
@@ -542,10 +556,33 @@ static int inray(byte x, byte y)
     (GD.rd(addr+33) > 0x80);
 }
 
+static void under_willy(byte &a, byte &b, byte &c, byte &d)
+{
+  uint32_t addr = atxy(state.wx / 8, state.wy / 8);
+  a = GD.rd(addr);
+  b = GD.rd(addr+1);
+  c = GD.rd(addr+32);
+  d = GD.rd(addr+33);
+}
+
+static byte any(byte code, byte a, byte b, byte c, byte d)
+{
+  return ((a == code) |
+          (b == code) |
+          (c == code) |
+          (d == code));
+}
+
 static void move_all(void)
 {
   state.t++;
   move_guardians();
+
+  // Animate conveyors: 
+  byte conveyor_offset = (7 & state.t) ^ (state.conveyordir ? 0 : 7);
+  uint32_t level_chars = TILES_MEM + 15 * 64 * state.level;
+  GD.wr_n(level_chars + 4 * 64, state.conveyor0 + conveyor_offset, 8);
+  GD.wr_n(level_chars + 4 * 64 + 3 * 8, state.conveyor1 + (7 ^ conveyor_offset), 8);
 
   // Willy movement
   // See http://www.seasip.demon.co.uk/Jsw/manic.mac
@@ -648,6 +685,11 @@ static void move_all(void)
     }
   }
 
+  byte a, b, c, d;
+  under_willy(a, b, c, d);
+  if (any(ELEM_NASTY1, a, b, c, d) | any(ELEM_NASTY2, a, b, c, d))
+    state.alive = 0;
+
 #if 0
   GD.waitvblank();    // let the screen display, then check for collisions
   byte coll = GD.rd(COLLISION + IMG_WILLY);
@@ -746,35 +788,43 @@ static void game_over()
   }
 }
 
+static const char marquee[] =
+"MANIC MINER . . "
+"(C) BUG-BYTE ltd. 1983 . . "
+"By Matthew Smith . . "
+"Gameduino2 conversion by James Bowman . . "
+"Guide Miner Willy through 19 lethal caverns";
+
 static void title_screen(void)
 {
-  for (uint16_t i = 0; i < 1500; i++) {
-    GD.get_inputs();
-    GD.ClearColorRGB(attr(2));
-    GD.Clear();
-    GD.Begin(BITMAPS);
-    screen2ii(0, 0, 5, 0);
-    draw_status(0);
+  for (;;) {
+    for (uint16_t i = 0; i < 1500; i++) {
+      GD.get_inputs();
+      GD.ClearColorRGB(attr(2));
+      GD.Clear();
+      GD.Begin(BITMAPS);
+      screen2ii(0, 0, 5, 0);
+      draw_status(0);
 
-    // Text crawl across bottom
-    GD.ScissorSize(256, 272);
-    GD.ScissorXY(112, 0);
-    GD.ColorRGB(WHITE);
-    static const char message[] = "MANIC MINER . . (C) BUG-BYTE ltd. 1983 . . By Matthew Smith . . . Gameduino2 conversion by James Bowman .  .  . Guide Miner Willy through 19 lethal caverns";
-    GD.cmd_text(112 + 256 - i, 222, 27, 0, message);
+      // Text crawl across bottom
+      GD.ScissorSize(256, 272);
+      GD.ScissorXY(112, 0);
+      GD.ColorRGB(WHITE);
+      GD.cmd_text(112 + 256 - i, 222, 27, 0, marquee);
 
-    GD.swap();
-    if (GD.inputs.x != -32768)
-      return;
-  }
-
-  for (state.level = 0; state.level < 19; state.level++) {
-    load_level();
-    for (byte t = 0; t < 30; t++) {
-      draw_all();
-      move_all();
+      GD.swap();
       if (GD.inputs.x != -32768)
         return;
+    }
+
+    for (state.level = 0; state.level < 19; state.level++) {
+      load_level();
+      for (byte t = 0; t < 30; t++) {
+        draw_all();
+        move_all();
+        if (GD.inputs.x != -32768)
+          return;
+      }
     }
   }
 }
@@ -790,15 +840,15 @@ void loop()
 
   state.level = START_LEVEL;
   state.score = 0;
-  load_level();
 
   for (state.lives = 3; state.lives; state.lives--) {
+    LOAD_ASSETS();
+    load_level();
     state.alive = 1;
     while (state.alive) {
       draw_all();
       move_all();
     }
-    game_over();
-    return;
   }
+  game_over();
 }
