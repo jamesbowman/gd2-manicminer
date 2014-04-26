@@ -169,14 +169,9 @@ static void load_level(void)
 
 static void draw_level(void)
 {
-  uint16_t mapsize = 16 * 32 * 4;
+  uint16_t mapsize = 16 * 32;
 
   const PROGMEM level *l = &levels[state.level];
-
-  GD.BitmapHandle(2);
-  GD.BitmapSource(MANICMINER_ASSET_TILES + 64 * 15 * state.level);
-  GD.BitmapHandle(1);
-  GD.BitmapSource(MANICMINER_ASSET_GUARDIANS + 8 * 32 * state.level);
 
   GD.ClearColorRGB(pgm_read_dword(&(l->border)));
   GD.Clear();
@@ -187,6 +182,7 @@ static void draw_level(void)
   // GD.cmd_regwrite(0, 0x55aa);
 
   GD.Begin(BITMAPS);
+  byte levelstart = state.level * 15;
   {
     uint32_t pmap = MANICMINER_ASSET_MAPS + state.level * mapsize;
     for (byte y = 0; y < 16; y++) {
@@ -201,7 +197,7 @@ static void draw_level(void)
       pmap += 32;
 
       for (x = 0; x < 32; x++)
-        screen2ii(x << 3, y << 3, 2, line[x]);
+        screen2ii(x << 3, y << 3, 2, levelstart + line[x]);
     }
   }
 
@@ -338,26 +334,14 @@ static void draw_willy()
   byte frame = state.wf ^ (state.wd ? 7 : 0);
   GD.ColorRGB(WHITE);
   GD.Begin(BITMAPS);
-  screen2ii(state.wx, state.wy, 0, frame);
+  screen2ii(state.wx, state.wy, HANDLE_WILLY, frame);
 }
 
 void setup()
 {
   GD.begin();
 
-  /*
-  int cnt = 0;
-  for (int i = 0; i < 1000; i++) {
-    GD.ClearColorRGB(0x0000ff);
-    GD.Clear();
-    GD.cmd_number(19, 19, 31, 3, cnt++);
-    GD.swap();
-  }
-  return;
-  */
-
-  GD.cmd_inflate(0);
-  GD.copy(manicminer_assets, sizeof(manicminer_assets));
+  LOAD_ASSETS();
 
   // Handle     Graphic
   //   0        Miner Willy
@@ -367,41 +351,6 @@ void setup()
   //   4        Items
   //   5        Title screen
   //   6        Specials: Eugene, Plinth and Boot
-
-  GD.BitmapHandle(0);
-  GD.BitmapSource(MANICMINER_ASSET_WILLY);
-  GD.BitmapSize(NEAREST, BORDER, BORDER, 16, 16);
-  GD.BitmapLayout(L1, 2, 16);
-
-  GD.BitmapHandle(1);
-  GD.BitmapSource(MANICMINER_ASSET_GUARDIANS);
-  GD.BitmapSize(NEAREST, BORDER, BORDER, 16, 16);
-  GD.BitmapLayout(L1, 2, 16);
-
-  GD.BitmapHandle(2);
-  GD.BitmapSource(MANICMINER_ASSET_TILES);
-  GD.BitmapSize(NEAREST, BORDER, BORDER, 8, 8);
-  GD.BitmapLayout(RGB332, 8, 8);
-
-  GD.BitmapHandle(3);
-  GD.BitmapSource(MANICMINER_ASSET_PORTALS);
-  GD.BitmapSize(NEAREST, BORDER, BORDER, 16, 16);
-  GD.BitmapLayout(RGB332, 16, 16);
-
-  GD.BitmapHandle(4);
-  GD.BitmapSource(MANICMINER_ASSET_ITEMS);
-  GD.BitmapSize(NEAREST, BORDER, BORDER, 8, 8);
-  GD.BitmapLayout(L1, 1, 8);
-
-  GD.BitmapHandle(5);
-  GD.BitmapSource(MANICMINER_ASSET_TITLE);
-  GD.BitmapSize(NEAREST, BORDER, BORDER, 256, 192);
-  GD.BitmapLayout(RGB332, 256, 192);
-
-  GD.BitmapHandle(6);
-  GD.BitmapSource(MANICMINER_ASSET_SPECIALS);
-  GD.BitmapSize(NEAREST, BORDER, BORDER, 16, 16);
-  GD.BitmapLayout(L1, 2, 16);
 
   GD.Clear();
   GD.swap();

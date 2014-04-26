@@ -156,31 +156,31 @@ class Level:
             tile = ((chr(0) * crumble) + floortile)[:8]
             extchars.append(tile)
             extattrs.append(self.bgattr[2])
+        tiles = []
         for i,(t,a) in enumerate(zip(extchars, extattrs)):
             mtile = Image.fromstring("1", (8,8), t)
             tile = bicolor(mtile, a)
             im0.paste(tile, (0, 8 * i))
-        (_, imgdata) = gameduino2.convert.convert(im0, False, fmt = gd2.RGB332)
-        return imgdata.tostring()
+            tiles.append(tile)
+        return tiles
         
     def background_str(self):
         return self.background.tostring()
 
     def item_image(self):
-        return self.item.tostring()
+        return Image.fromstring("1", (8, 8), self.item.tostring())
 
     def portal_image(self):
         im = Image.fromstring("1", (16, 16), self.portal.tostring())
         im = bicolor(im, self.portalattr)
-        (_, imgdata) = gameduino2.convert.convert(im, False, fmt = gd2.RGB332)
-        return imgdata.tostring()
+        return im
 
     def special_image(self):
         im = Image.fromstring("1", (16, 16), self.special.tostring())
-        return im.tostring()
+        return im
 
     def guardian_images(self):
-        return "".join([g.tostring() for g in self.guardian])
+        return [Image.fromstring("1", (16, 16), g.tostring()) for g in self.guardian]
 
     def dump(self, hh):
         print >>hh, "{ //", self.name
@@ -212,91 +212,72 @@ class Level:
         print >>hh, "%d," % self.bidir
         print >>hh, "},"
 
+class ManicMiner(gd2.prep.AssetBin):
+
+    header = "../manicminer/manicminer.h"
+
+    def addall(self):
+        m = readz80("mm2.z80")
+        screens = m[45056 - 16384:]
+        levels = [Level(i, screens[1024*i:1024*(i+1)]) for i in range(19)]
+
+        self.m = m
+        self.screens = screens
+        self.levels = levels
+
+        assets = []
+        assets.append(("maps", "".join([l.background_str() for l in levels])))
+
+        willy = Image.fromstring("1", (16, 8 * 16), m[33280-16384:33536-16384].tostring())
+        self.load_handle("WILLY", gd2.prep.split(16, 16, willy), gd2.L1)
+
+        guardians = sum([l.guardian_images() for l in levels], [])
+        self.load_handle("MANICMINER_ASSET_GUARDIANS", guardians, gd2.L1)
+
+        tiles = sum([l.background_tiles() for l in levels], [])
+        self.load_handle("MANICMINER_ASSET_TILES", tiles, gd2.RGB332)
+
+        portals = [l.portal_image() for l in levels]
+        self.load_handle("MANICMINER_ASSET_PORTALS", portals, gd2.RGB332)
+
+        items = [l.item_image() for l in levels]
+        self.load_handle("MANICMINER_ASSET_ITEMS", items, gd2.L1)
+
+        self.load_handle("MANICMINER_ASSET_TITLE", [Image.open("mmtitle.png")], gd2.RGB332)
+
+        eugene = levels[4].special_image()
+        plinth = levels[1].special_image()
+        boot = levels[2].special_image()
+        self.load_handle("MANICMINER_ASSET_SPECIALS", [eugene, plinth, boot], gd2.L1)
+
+        for (name, s) in assets:
+            self.add("MANICMINER_ASSET_%s" % name.upper(), s)
+        
+    def extras(self, hh):
+
+        m = self.m
+        screens = self.screens
+        levels = self.levels
+        tune = m[34188-16384:34252-16384]
+        def spec2midi(n):
+            f = (128 * 261.63) / n
+            midi = round(12 * math.log(f / 440, 2) + 69)
+            return int(midi)
+        tune = array.array('B', [spec2midi(n) for n in tune])
+
+        print >>hh, "static const PROGMEM prog_uchar manicminer_tune[] = {"
+        print >>hh, ",".join(["%d" % c for c in tune])
+        print >>hh, "};";
+
+        for lvl in levels:
+            lvl.bidir = lvl.id in [0,1,2,3,4,5,6,9,15]
+
+        print >>hh, "static const PROGMEM level levels[] = {"
+        for lvl in levels:
+            lvl.dump(hh)
+            time.sleep(0)
+        print >>hh, "};"
+
 if __name__ == '__main__':
-    m = readz80("mm2.z80")
-    tune = m[34188-16384:34252-16384]
-    screens = m[45056 - 16384:]
-    levels = [Level(i, screens[1024*i:1024*(i+1)]) for i in range(19)]
-
-    hh = open("../manicminer/manicminer.h", "wt")
-
-    def spec2midi(n):
-        f = (128 * 261.63) / n
-        midi = round(12 * math.log(f / 440, 2) + 69)
-        return int(midi)
-    tune = array.array('B', [spec2midi(n) for n in tune])
-
-    assets = []
-    assets.append(("willy", m[33280-16384:33536-16384].tostring()))
-    assets.append(("guardians", "".join([l.guardian_images() for l in levels])))
-    assets.append(("maps", "".join([l.background_str() for l in levels])))
-    assets.append(("tiles", "".join([l.background_tiles() for l in levels])))
-    assets.append(("items", "".join([l.item_image() for l in levels])))
-    assets.append(("portals", "".join([l.portal_image() for l in levels])))
-    (_, imgdata) = gameduino2.convert.convert(Image.open("mmtitle.png"), False, fmt = gd2.RGB332)
-    assets.append(("title", imgdata.tostring()))
-    eugene = levels[4].special_image()
-    plinth = levels[1].special_image()
-    boot = levels[2].special_image()
-    assets.append(("specials", eugene + plinth + boot))
-
-    pos = 0
-    for (name, s) in assets:
-        print >>hh, "#define MANICMINER_ASSET_%s %dUL" % (name.upper(), pos)
-        pos += len(s)
-    
-    alldata = "".join([d for (_, d) in assets])
-    calldata = zlib.compress(alldata)
-    print 'total size:', len(alldata), 'compressed size:', len(calldata)
-
-    print >>hh, "static const PROGMEM prog_uchar manicminer_assets[] = {"
-    print >>hh, ",".join(["%d" % ord(c) for c in calldata])
-    print >>hh, "};";
-
-    print >>hh, "static const PROGMEM prog_uchar manicminer_tune[] = {"
-    print >>hh, ",".join(["%d" % c for c in tune])
-    print >>hh, "};";
-
-    for lvl in levels:
-        lvl.bidir = lvl.id in [0,1,2,3,4,5,6,9,15]
-
-    print >>hh, "static const PROGMEM level levels[] = {"
-    for lvl in levels:
-        lvl.dump(hh)
-        time.sleep(0)
-    print >>hh, "};"
-
-    sys.exit(0)
-
-    gdprep.dump(hh, "specpal", array.array('H', [gameduino.gd2.RGB(*color(7&i, i & 8)) for i in range(16)]))
-    gdprep.dump(hh, "specfont", array.array('B', open("gw03.rom").read()[0x3d00:]))
-    gdprep.dump(hh, "music1", tune)
-    gdprep.dump(hh, "boot", levels[2].special)
-    gdprep.dump(hh, "plinth", levels[1].special)
-    gdprep.dump(hh, "eugene", levels[4].special)
-    gdprep.dump(hh, "lightswitch", array.array('B', levels[7].bgchars[7]))
-    cd = gameduino.compress.Codec(7, 5)
-    print sum([lvl.dumpmap(hh, cd) for lvl in levels]), "in maps"
-    print >>hh, "static const PROGMEM prog_uint32_t blue_danube[] = {"
-    print >>hh, ",".join("%d" % n for n in pickle.load(open("tune")))
-    print >>hh, "};"
-    print >>hh, 'static const PROGMEM prog_uchar message[] = "%s";' % message
-
-    print >>hh, "static const PROGMEM level levels[] = {"
-    for lvl in levels:
-        lvl.dump(hh)
-        time.sleep(0)
-    print >>hh, "};"
-
-    if 1:
-        for s in range(8):
-            Image.fromstring("1", (16,16), lvl[768 + 32 * s:768 + 32 * (s+1)].tostring()).save("s%d.png" % s)
-        Image.fromstring("1", (16,8 * 16), lvl[768:1024]).save("out.png")
-
-        # char 4 is conveyor, animate:
-        while True:
-            conv_top = ((conv_top << 1) & 255) | (conv_top >> 7)
-            gd.wrstr(gameduino.RAM_CHR + 16 * 4, array.array('B', pix16(conv_top)))
-            conv_bot = ((conv_bot >> 1) & 255) | ((conv_bot & 1) << 7)
-            gd.wrstr(gameduino.RAM_CHR + 16 * 4 + 6, array.array('B', pix16(conv_bot)))
-            time.sleep(.1)
+    mm = ManicMiner()
+    mm.make()
