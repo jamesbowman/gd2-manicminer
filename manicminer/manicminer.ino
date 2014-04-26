@@ -345,7 +345,7 @@ static void draw_willy()
 
 void setup()
 {
-  GD.begin();
+  GD.begin(~GD_STORAGE);
 
   LOAD_ASSETS();
 
@@ -488,14 +488,14 @@ uint32_t atxy(byte x, byte y)
 }
 
 // crumble block at s, which is the sequence
-// 2->8->9->10->11->12->13->14->0
+// 2 -> 8 -> 9 -> 10 -> 11 -> 12 -> 13 -> 14 -> AIR
 
 static void crumble(uint32_t s)
 {
   byte r = GD.rd(s);
   signed char nexts[] = {
     -1, -1,  8, -1, -1, -1, -1, -1,
-    9,  10, 11, 12, 13, 14, 0 };
+    9,  10, 11, 12, 13, 14, ELEM_AIR };
   if (r < sizeof(nexts) && nexts[r] != -1)
     GD.wr(s, nexts[r]);
 }
@@ -507,8 +507,8 @@ static int canbe(byte x, byte y)
   return
     (GD.rd(addr) != ELEM_WALL) &&
     (GD.rd(addr+1) != ELEM_WALL) &&
-    (GD.rd(addr+64) != ELEM_WALL) &&
-    (GD.rd(addr+65) != ELEM_WALL);
+    (GD.rd(addr+32) != ELEM_WALL) &&
+    (GD.rd(addr+33) != ELEM_WALL);
 }
 
 static void move_all(void)
@@ -529,7 +529,7 @@ static void move_all(void)
     byte index = min(sizeof(moves) - 1, state.jumping - 1);
     byte newy = state.wy + moves[index];
     state.jumping++;
-    if (1 || canbe(state.wx, newy)) {
+    if (canbe(state.wx, newy)) {
       ychanged = (state.wy >> 3) != (newy >> 3);
       state.wy = newy;
     } else {
@@ -590,7 +590,7 @@ static void move_all(void)
   }
 
   byte onground = ((1 <= elem) && (elem <= 4)) || ((7 <= elem) && (elem <= 16));
-  // sprintf(debug, "jumping=%d elem=%d onground=%d", state.jumping, elem, onground);
+  sprintf(debug, "jumping=%d elem=%d onground=%d", state.jumping, elem, onground);
   if (state.jumping) {
     if ((JUMP_APEX <= state.jumping) && ychanged && onground) {
       state.jumping = 0;
@@ -718,7 +718,8 @@ static void game_over()
 
 static void title_screen(void)
 {
-  for (uint16_t i = 0; i < 1500 /*60*/; i++) {
+  for (uint16_t i = 0; i < 1500; i++) {
+    GD.get_inputs();
     GD.ClearColorRGB(attr(2));
     GD.Clear();
     GD.Begin(BITMAPS);
@@ -733,6 +734,8 @@ static void title_screen(void)
     GD.cmd_text(112 + 256 - i, 222, 27, 0, message);
 
     GD.swap();
+    if (GD.inputs.x != -32768)
+      return;
   }
 
   for (state.level = 0; state.level < 19; state.level++) {
@@ -740,13 +743,20 @@ static void title_screen(void)
     for (byte t = 0; t < 30; t++) {
       draw_all();
       move_all();
+      if (GD.inputs.x != -32768)
+        return;
     }
   }
 }
 
 void loop()
 {
-  // title_screen();
+  title_screen();
+  do {
+    GD.get_inputs();
+    GD.Clear();
+    GD.swap();
+  } while (GD.inputs.x != -32768);
 
   state.level = START_LEVEL;
   state.score = 0;
