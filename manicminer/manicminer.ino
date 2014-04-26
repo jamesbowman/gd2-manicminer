@@ -3,12 +3,18 @@
 #include <GD2.h>
 
 #define CHEAT_INVINCIBLE    0   // means Willy unaffected by nasties
-#define START_LEVEL         4  // level to start on, 0-18
+#define START_LEVEL         0  // level to start on, 0-18
 #define CHEAT_OPEN_PORTAL   0   // Portal always open
 
 // Game has three controls: LEFT, RIGHT, JUMP.  You can map them
 // to any pins by changing the definitions of PIN_L, PIN_R, PIN_J
 // below.
+
+#define CONTROL_LEFT      1
+#define CONTROL_RIGHT     2
+#define CONTROL_JUMP      4
+
+#define control()   (GD.inputs.tag)
 
 // The basic colors
 #define BLACK   RGB(0,   0,   0)
@@ -89,9 +95,6 @@ static void bump_score(byte n)
 static void load_level(void)
 {
   const PROGMEM level *l = &levels[state.level];
-
-  // state.conveyor[0] = pgm_read_byte_near(&l->bgchars[8 * 4 + 0]);
-  // state.conveyor[1] = pgm_read_byte_near(&l->bgchars[8 * 4 + 3]);
 
   // the items are 5 sprites, using colors 16 up
   state.nitems = 0;
@@ -184,7 +187,23 @@ static void draw_level(void)
   // GD.cmd_regwrite(0, 0x55aa);
 
   GD.Begin(BITMAPS);
-  GD.cmd_append(MANICMINER_ASSET_MAPS + state.level * mapsize, mapsize);
+  {
+    uint32_t pmap = MANICMINER_ASSET_MAPS + state.level * mapsize;
+    for (byte y = 0; y < 16; y++) {
+      byte x;
+      byte line[32];
+
+      GD.bulkrd(pmap);
+      SPI.transfer(0);
+      for (x = 0; x < 32; x++)
+        line[x] = SPI.transfer(0);
+      GD.resume();
+      pmap += 32;
+
+      for (x = 0; x < 32; x++)
+        screen2ii(x << 3, y << 3, 2, line[x]);
+    }
+  }
 
   // the portal is a sprite
   byte portalx = pgm_read_byte_near(&l->portalx);
@@ -301,9 +320,16 @@ static void draw_button(int x, int y, byte angle)
 
 static void draw_controls()
 {
+  GD.Tag(CONTROL_LEFT);
   draw_button(      45, 272 - 45,  4);
+
+  GD.Tag(CONTROL_LEFT | CONTROL_JUMP);
   draw_button(      45, 272 - 140, 3);
+
+  GD.Tag(CONTROL_RIGHT);
   draw_button(480 - 45, 272 - 45,  0);
+
+  GD.Tag(CONTROL_RIGHT | CONTROL_JUMP);
   draw_button(480 - 45, 272 - 140, 1);
 }
 
@@ -330,7 +356,6 @@ void setup()
   return;
   */
 
-  GD.Clear();
   GD.cmd_inflate(0);
   GD.copy(manicminer_assets, sizeof(manicminer_assets));
 
@@ -378,6 +403,7 @@ void setup()
   GD.BitmapSize(NEAREST, BORDER, BORDER, 16, 16);
   GD.BitmapLayout(L1, 2, 16);
 
+  GD.Clear();
   GD.swap();
 }
 
@@ -507,6 +533,143 @@ static void move_all(void)
 {
   state.t++;
   move_guardians();
+
+  // Willy movement
+  // See http://www.seasip.demon.co.uk/Jsw/manic.mac
+  // and http://jetsetwilly.jodi.org/poke.html
+
+#if 0
+  byte con = control();
+  byte ychanged = 0;  // if Y block changes must check for landing later
+  if (state.jumping) {
+#define JUMP_APEX 9   
+#define JUMP_FALL 11  //  1   2   3   4   5   6   7   8   9  10 11
+    signed char moves[] = {  -4, -4, -3, -3, -2, -2, -1, -1, 0, 0, 1, 1, 2, 2, 3, 3, 4 };
+    byte index = min(sizeof(moves) - 1, state.jumping - 1);
+    byte newy = state.wy + moves[index];
+    state.jumping++;
+    if (canbe(state.wx, newy)) {
+      ychanged = (state.wy >> 3) != (newy >> 3);
+      state.wy = newy;
+    } else {
+      state.jumping = max(state.jumping, JUMP_FALL);   // halt ascent
+      ychanged = 1;
+    }
+  }
+  uint16_t feet_addr = atxy(state.wx >> 3, (state.wy + 16) >> 3);
+  byte elem0 = GD.rd(feet_addr);
+  byte elem1 = GD.rd(feet_addr + 1);
+  byte elem = ((1 <= elem0) && (elem0 <= 31)) ? elem0 : elem1;
+
+  byte dx = 0xff;
+  byte first_jump = (con & CONTROL_JUMP) && state.lastdx == 0xff;
+  if (state.jumping) {
+    dx = state.lastdx;
+  } else if (!first_jump && (elem == ELEM_CONVEYOR) && (state.wd == state.conveyordir)) {
+    dx = state.conveyordir;
+  } else {
+    if (con & CONTROL_RIGHT) {
+      if (state.wd != 0) {
+        state.wf ^= 3;
+        state.wd = 0;
+      } else {
+        dx = 0;
+      }
+    } else if (con & CONTROL_LEFT) {
+      if (state.wd == 0) {
+        state.wf ^= 3;
+        state.wd = 1;
+      } else {
+        dx = 1;
+      }
+    }
+  }
+  if (dx != 0xff) {
+    if (state.wf != 3)
+      state.wf++;
+    else {
+      byte newx = state.wx + (dx ? -8 : 8);
+      if (canbe(newx, state.wy)) {
+        state.wf = 0;
+        state.wx = newx;
+      }
+    }
+  }
+  state.lastdx = dx;
+
+  if ((elem == ELEM_CONVEYOR) && (dx == 0xff) && !state.jumping)
+    state.wd = state.conveyordir;
+
+  if (!state.jumping && (con & CONTROL_JUMP)) {
+    if (canbe(state.wx, state.wy - 3)) {
+      state.jumping = 1;
+      state.wy -= 0;
+    }
+  }
+
+  byte onground = ((1 <= elem) && (elem <= 4)) || ((7 <= elem) && (elem <= 16));
+  if (state.jumping) {
+    if ((JUMP_APEX <= state.jumping) && ychanged && onground) {
+      state.jumping = 0;
+      state.wy &= ~7;
+    }
+    if (state.jumping >= 19)    // stop x movement late in the jump
+      state.lastdx = 0xff;
+  } else {
+    if (!onground) {    // nothing to stand on, start falling
+      state.jumping = JUMP_FALL;
+      state.lastdx = 0xff;
+    }
+  }
+  if (!state.jumping) {
+    crumble(feet_addr);
+    crumble(feet_addr + 1);
+  }
+
+  if (((t & 7) == 0) ||
+     ((state.level == 18) && inray(state.wx, state.wy))) {
+    state.air--;
+    plot_air();
+    if (state.air == 0) {
+      alive = 0;
+    }
+  }
+  GD.waitvblank();    // let the screen display, then check for collisions
+  byte coll = GD.rd(COLLISION + IMG_WILLY);
+  if (coll <= (IMG_ITEM + 4)) {
+    bump_score(100);
+    hide(coll - IMG_ITEM);
+    --state.nitems;
+  } else if (coll == IMG_PORTAL) {
+    if (CHEAT_OPEN_PORTAL || state.nitems == 0) {
+      while (state.air) {
+        squarewave(0, 800 + 2 * state.air, 100);
+        state.air--;
+        plot_air();
+        bump_score(7);
+        GD.waitvblank();
+      }
+      state.level = (state.level + 1) % 18;
+      loadlevel(&levels[state.level]);
+    }
+  } else if (coll == IMG_SWITCH1) {
+    if (!state.switch1) {
+      state.switch1 = 1;
+      sprite(IMG_SWITCH1, 48 - 8, 0, IMG_SWITCH1, 2);
+      GD.wr(atxy(17, 11), 0);
+      GD.wr(atxy(17, 12), 0);
+    }
+  } else if (coll == IMG_SWITCH2) {
+    if (coll == IMG_SWITCH2) {
+      state.switch2 = 1;
+      sprite(IMG_SWITCH2, 144 - 8, 0, IMG_SWITCH2, 2);
+      GD.wr(atxy(15, 2), 0);
+      GD.wr(atxy(16, 2), 0);
+    }
+  } else if (coll != 0xff && !CHEAT_INVINCIBLE) {
+    alive = 0;
+  }
+#endif
 }
 
 static void draw_all(void)
@@ -514,12 +677,14 @@ static void draw_all(void)
   byte midi = pgm_read_byte_near(manicminer_tune + ((state.t >> 1) & 63));
   GD.cmd_regwrite(REG_SOUND, 0x01 | (midi << 8));
   GD.cmd_regwrite(REG_PLAY, 1);
+  GD.get_inputs();
   for (int j = 0; j < 5; j++) {
     draw_level();
     draw_willy();
     draw_guardians();
     draw_status(1);
     draw_controls();
+    GD.cmd_number(0, 0, 31, 0, GD.inputs.tag);
     GD.swap();
     GD.cmd_regwrite(REG_SOUND, 0);
     GD.cmd_regwrite(REG_PLAY, 1);
@@ -596,10 +761,7 @@ static void title_screen(void)
 
 void loop()
 {
-  title_screen();
-  state.level = 18;
-  game_over();
-  return;
+  // title_screen();
 
   state.level = START_LEVEL;
   state.score = 0;

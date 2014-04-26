@@ -11,7 +11,7 @@ import gameduino2 as gd2
 import gameduino2.convert
 
 def readz80(z80file):
-    z80 = array.array('B', open(z80file).read()).tolist()
+    z80 = array.array('B', open(z80file, "rb").read()).tolist()
     mem = []
     comp = z80[30:]
     while True:
@@ -164,10 +164,7 @@ class Level:
         return imgdata.tostring()
         
     def background_str(self):
-        (x0, y0) = (112, 32)
-        def plotchar(i, c):
-            return gd2.VERTEX2II(x0 + 8 * (i % 32), y0 + 8 * (i / 32), 2, c)
-        return array.array('I', [plotchar(i, c) for i,c in enumerate(self.background)]).tostring()
+        return self.background.tostring()
 
     def item_image(self):
         return self.item.tostring()
@@ -185,11 +182,6 @@ class Level:
     def guardian_images(self):
         return "".join([g.tostring() for g in self.guardian])
 
-    def dumpmap(self, hh, cd):
-        compressed = cd.toarray(self.background.tostring())
-        gdprep.dump(hh, "map_%02d" % self.id, compressed)
-        return len(compressed)
-
     def dump(self, hh):
         print >>hh, "{ //", self.name
         def init(a):
@@ -203,8 +195,8 @@ class Level:
         print >>hh, '"%s",' % self.name
         print >>hh, "0x%06x," % self.border
         # da(self.background)
-        print >>hh, "{", ",".join([init(cc) for cc in self.bgchars]), "},"
-        da(self.bgattr)
+        # print >>hh, "{", ",".join([init(cc) for cc in self.bgchars]), "},"
+        # da(self.bgattr)
         # da(self.item)
         print >>hh, "{", ",".join(["{%d,%d}" % xy for xy in self.items]), "},"
         # da(self.portal)
@@ -220,51 +212,13 @@ class Level:
         print >>hh, "%d," % self.bidir
         print >>hh, "},"
 
-    def render(self, gd):
-        gd.putstr(0, 16, self.name)
-        for c in range(8):
-            chrdata = array.array('B', sum([pix16(d) for d in self.bgchars[c]], []))
-            gd.wrstr(gameduino.RAM_CHR + 16 * c, chrdata)
-
-            ink = gameduino.RGB(*color(self.bgattr[c] & 7, self.bgattr[c] & 64))
-            paper = gameduino.RGB(*color((self.bgattr[c] >> 3) & 7, self.bgattr[c] & 64))
-            gd.wr16(gameduino.RAM_PAL + 8 * c, paper)
-            gd.wr16(gameduino.RAM_PAL + 8 * c + 6, ink)
-        
-        for y in range(16):
-            li = self.background[32*y:32*y+32]
-            gd.wrstr(gameduino.RAM_PIC + 64 * y, li)
-
-        for i in range(8):
-            gd.wr16(gameduino.RAM_SPRPAL + 2 * i, gameduino.RGB(*color(i)))
-        gd.wr16(gameduino.RAM_SPRPAL + 2 * 8, gameduino.TRANSPARENT)
-
-        def loadimg(slot, im, zero, one):
-            xlat = {0:zero, 255:one}
-            itemdata = [xlat[ord(c)] for c in im.convert("L").tostring()]
-            gd.wrstr(gameduino.RAM_SPRIMG + 256 * slot, array.array('B', itemdata))
-
-        loadimg(0, img8x8(self.item), 8, 7)
-        loadimg(1, img16x16(self.portal), 7&(self.portalattr>>3), (self.portalattr&7))
-        for i in range(8):
-            loadimg(2 + i, img16x16(self.guardian[i]), 8, 7)
-
-        for i,(x,y) in enumerate(self.items):
-            gd.sprite(i, x, y, 0, 0, 0)
-            
-        (x,y) = self.portalxy
-        gd.sprite(6, x, y, 1, 0, 0)
-
-        for i,(a,x,y,d,x0,x1) in enumerate(self.hguardians):
-            gd.sprite(7+i, x, y, 2 + i, 0, 0)
-
 if __name__ == '__main__':
     m = readz80("mm2.z80")
     tune = m[34188-16384:34252-16384]
     screens = m[45056 - 16384:]
     levels = [Level(i, screens[1024*i:1024*(i+1)]) for i in range(19)]
 
-    hh = open("../manicminer/manicminer.h", "w")
+    hh = open("../manicminer/manicminer.h", "wt")
 
     def spec2midi(n):
         f = (128 * 261.63) / n

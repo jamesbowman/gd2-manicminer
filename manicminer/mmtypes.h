@@ -1,8 +1,6 @@
 struct level {
   char name[33];
   uint32_t border;
-  byte bgchars[64];
-  byte bgattr[8];
   struct { byte x, y; } items[5];
   byte air;
   byte conveyordir;
