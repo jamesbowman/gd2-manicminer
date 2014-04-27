@@ -727,7 +727,8 @@ static void move_all(void)
 
   byte portalx = pgm_read_byte_near(&l->portalx);
   byte portaly = pgm_read_byte_near(&l->portaly);
-  if (collide_16x16(portalx, portaly)) {
+  if (((CHEAT_OPEN_PORTAL || state.nitems == 0)) &&
+      collide_16x16(portalx, portaly)) {
     while (state.air) {
       // squarewave(0, 800 + 2 * state.air, 100);
       state.air--;
