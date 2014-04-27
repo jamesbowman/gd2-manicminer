@@ -6,7 +6,7 @@ char debug[80];
 
 #define CHEAT_INVINCIBLE    0   // means Willy unaffected by nasties
 #define START_LEVEL         0   // level to start on, 0-18
-#define CHEAT_OPEN_PORTAL   1   // Portal always open
+#define CHEAT_OPEN_PORTAL   0   // Portal always open
 
 // Game has three controls: LEFT, RIGHT, JUMP.  You can map them
 // to any pins by changing the definitions of PIN_L, PIN_R, PIN_J
@@ -57,7 +57,7 @@ static uint32_t attr(byte a)
 
 #define MAXRAY 40
 
-struct state_t {
+static struct state_t {
   byte level;
   byte lives;
   byte alive;
@@ -85,6 +85,8 @@ struct state_t {
   byte switch1, switch2;
 } state;
 
+static struct guardian guards[8];
+
 // Read graphics memory... this should really be moved to GD2.
 static void readmem(byte *dst, uint32_t src, size_t n)
 {
@@ -102,9 +104,12 @@ static void screen2ii(byte x, byte y, byte handle = 0, byte cell = 0)
 
 static void bump_score(byte n)
 {
-  if ((state.score < 10000) && (10000 <= (state.score + n )))
-    state.lives++;
+  uint32_t old_score = state.score;
   state.score += n;
+
+  // Extra life on crossing 10K
+  if ((old_score < 10000) && (10000 <= state.score))
+    state.lives++;
 }
 
 static void load_level(void)
@@ -236,13 +241,13 @@ static void draw_level(void)
 
   // the items are 5 sprites
   uint32_t colors[4] = { MAGENTA, YELLOW, CYAN, GREEN };
-  for (byte i = 0; i < 5; i++) {
-    byte x = pgm_read_byte_near(&l->items[i].x);
-    byte y = pgm_read_byte_near(&l->items[i].y);
-    GD.ColorRGB(colors[(i + state.t) & 3]);
-    if (x || y)
+  for (byte i = 0; i < 5; i++) 
+    if (state.items[i]) {
+      byte x = pgm_read_byte_near(&l->items[i].x);
+      byte y = pgm_read_byte_near(&l->items[i].y);
+      GD.ColorRGB(colors[(i + state.t) & 3]);
       screen2ii(x, y, 4, state.level);
-  }
+    }
 }
 
 static void draw_status(byte playing)
@@ -394,11 +399,10 @@ void setup()
 
 static void draw_guardians(void)
 {
-  guardian *pg;
-
   GD.BitmapHandle(GUARDIANS_HANDLE);
   GD.BitmapSource(GUARDIANS_MEM + 8 * 32 * state.level);
 
+  guardian *pg;
   for (byte i = 0; i < 8; i++) {
     pg = &guards[i];
     if (pg->a) {
@@ -573,6 +577,12 @@ static byte any(byte code, byte a, byte b, byte c, byte d)
           (d == code));
 }
 
+static byte collide_16x16(byte x, byte y)
+{
+  return (abs(state.wx - x) < 7) &&
+         (abs(state.wy - y) < 15);
+}
+
 static void move_all(void)
 {
   state.t++;
@@ -690,43 +700,48 @@ static void move_all(void)
   if (any(ELEM_NASTY1, a, b, c, d) | any(ELEM_NASTY2, a, b, c, d))
     state.alive = 0;
 
-#if 0
-  GD.waitvblank();    // let the screen display, then check for collisions
-  byte coll = GD.rd(COLLISION + IMG_WILLY);
-  if (coll <= (IMG_ITEM + 4)) {
-    bump_score(100);
-    hide(coll - IMG_ITEM);
-    --state.nitems;
-  } else if (coll == IMG_PORTAL) {
-    if (CHEAT_OPEN_PORTAL || state.nitems == 0) {
-      while (state.air) {
-        squarewave(0, 800 + 2 * state.air, 100);
-        state.air--;
-        plot_air();
-        bump_score(7);
-        GD.waitvblank();
-      }
-      state.level = (state.level + 1) % 18;
-      loadlevel(&levels[state.level]);
-    }
-  } else if (coll == IMG_SWITCH1) {
-    if (!state.switch1) {
-      state.switch1 = 1;
-      sprite(IMG_SWITCH1, 48 - 8, 0, IMG_SWITCH1, 2);
-      GD.wr(atxy(17, 11), 0);
-      GD.wr(atxy(17, 12), 0);
-    }
-  } else if (coll == IMG_SWITCH2) {
-    if (coll == IMG_SWITCH2) {
-      state.switch2 = 1;
-      sprite(IMG_SWITCH2, 144 - 8, 0, IMG_SWITCH2, 2);
-      GD.wr(atxy(15, 2), 0);
-      GD.wr(atxy(16, 2), 0);
-    }
-  } else if (coll != 0xff && !CHEAT_INVINCIBLE) {
-    alive = 0;
+  guardian *pg;
+  for (byte i = 0; i < 8; i++) {
+    pg = &guards[i];
+    if (pg->a && collide_16x16(pg->x, pg->y))
+      state.alive = 0;
   }
-#endif
+
+  state.alive |= CHEAT_INVINCIBLE;
+
+  byte wx = state.wx / 8;
+  byte wy = state.wy / 8;
+
+  const PROGMEM level *l = &levels[state.level];
+  for (byte i = 0; i < 5; i++) 
+    if (state.items[i]) {
+      byte x = pgm_read_byte_near(&l->items[i].x) / 8;
+      byte y = pgm_read_byte_near(&l->items[i].y) / 8;
+      if (((x == wx) || (x == (wx + 1))) &&
+          ((y == wy) || (y == (wy + 1)))) {
+        bump_score(100);
+        state.items[i] = 0;
+        --state.nitems;
+      }
+    }
+
+  byte portalx = pgm_read_byte_near(&l->portalx);
+  byte portaly = pgm_read_byte_near(&l->portaly);
+  if (collide_16x16(portalx, portaly)) {
+    while (state.air) {
+      // squarewave(0, 800 + 2 * state.air, 100);
+      state.air--;
+      bump_score(7);
+      draw_level();
+      draw_willy();
+      draw_guardians();
+      draw_status(1);
+      draw_controls();
+      GD.swap();
+    }
+    state.level = (state.level + 1) % 18;
+    load_level();
+  }
 }
 
 static void draw_all(void)
@@ -741,7 +756,6 @@ static void draw_all(void)
     draw_guardians();
     draw_status(1);
     draw_controls();
-    GD.cmd_text(0, 0, 18, 0, debug);
     GD.swap();
     GD.cmd_regwrite(REG_SOUND, 0);
     GD.cmd_regwrite(REG_PLAY, 1);

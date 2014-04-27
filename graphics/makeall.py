@@ -84,9 +84,6 @@ class Level:
                 a2c[attr] = c
             self.bgchars[c] = data
             self.bgattr[c] = attr
-            if c == 4:  # conveyor
-                conv_top = data[0]
-                conv_bot = data[3]
         self.background = array.array('B', [a2c[a] for a in lvl[:512]])
         self.border = gd2.RGB(*color(lvl[627], 0))
         self.item = lvl[692:700]

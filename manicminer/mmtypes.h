@@ -17,4 +17,4 @@ struct guardian {
   signed char d;
   byte x0, x1;
   byte f;
-} guards[8];
+};
